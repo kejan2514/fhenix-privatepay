@@ -1,0 +1,7 @@
+.cofhe-localstorage*
+.env
+artifacts/
+cache/
+node_modules/
+types/
+typechain-types/
