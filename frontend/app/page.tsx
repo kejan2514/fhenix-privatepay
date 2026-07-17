@@ -2,6 +2,16 @@
 
 import { FormEvent, useState } from "react";
 
+type Token = "cUSD" | "cEUR";
+type EthereumProvider = {
+  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+};
+
+const TOKENS: Record<Token, { symbol: string; name: string }> = {
+  cUSD: { symbol: "$", name: "Confidential USD" },
+  cEUR: { symbol: "€", name: "Confidential EUR" },
+};
+
 const LockIcon = ({ size = 18 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <rect x="5" y="10" width="14" height="11" rx="3" stroke="currentColor" strokeWidth="1.8" />
@@ -19,10 +29,50 @@ const EyeIcon = ({ crossed = false }: { crossed?: boolean }) => (
 
 export default function Home() {
   const [connected, setConnected] = useState(false);
+  const [walletAddress, setWalletAddress] = useState("");
   const [revealed, setRevealed] = useState(false);
+  const [token, setToken] = useState<Token>("cUSD");
+  const [balances, setBalances] = useState<Record<Token, number>>({ cUSD: 0, cEUR: 0 });
+  const [faucetLoading, setFaucetLoading] = useState(false);
+  const [activity, setActivity] = useState<string[]>([]);
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [notice, setNotice] = useState("");
+
+  async function connectWallet() {
+    const ethereum = (window as typeof window & { ethereum?: EthereumProvider }).ethereum;
+    if (!ethereum) {
+      setNotice("MetaMask was not found. Install a browser wallet to connect.");
+      return;
+    }
+    try {
+      const accounts = (await ethereum.request({ method: "eth_requestAccounts" })) as string[];
+      setWalletAddress(accounts[0] ?? "");
+      setConnected(Boolean(accounts[0]));
+      setNotice("Wallet connected. Demo token actions are now available.");
+      try {
+        await ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x66eee" }] });
+      } catch {
+        setNotice("Wallet connected. Switch to Arbitrum Sepolia for future on-chain actions.");
+      }
+    } catch {
+      setNotice("Wallet connection was cancelled.");
+    }
+  }
+
+  async function claimTokens() {
+    if (!connected) {
+      setNotice("Connect your wallet before using the demo faucet.");
+      return;
+    }
+    setFaucetLoading(true);
+    setNotice("Encrypting demo token allocation...");
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+    setBalances((current) => ({ ...current, [token]: current[token] + 1000 }));
+    setActivity((current) => [`Faucet · +1,000 ${token}`, ...current].slice(0, 3));
+    setNotice(`1,000 demo ${token} added locally. No on-chain tokens were minted.`);
+    setFaucetLoading(false);
+  }
 
   function handleTransfer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -34,6 +84,12 @@ export default function Home() {
       setNotice("Enter a valid recipient and amount.");
       return;
     }
+    if (Number(amount) > balances[token]) {
+      setNotice(`Insufficient demo ${token} balance. Use the faucet first.`);
+      return;
+    }
+    setBalances((current) => ({ ...current, [token]: current[token] - Number(amount) }));
+    setActivity((current) => [`Private send · −${Number(amount).toLocaleString()} ${token}`, ...current].slice(0, 3));
     setNotice("Demo transfer encrypted locally — no on-chain transaction was sent.");
     setRecipient("");
     setAmount("");
@@ -53,8 +109,8 @@ export default function Home() {
           <a href="#how">How it works</a>
           <a href="#privacy">Privacy</a>
           <span className="network"><i /> Arbitrum Sepolia</span>
-          <button className="wallet-button" onClick={() => setConnected((value) => !value)}>
-            {connected ? <><span className="wallet-dot" />0x71F...29A</> : "Connect wallet"}
+          <button className="wallet-button" onClick={connectWallet}>
+            {connected ? <><span className="wallet-dot" />{walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}</> : "Connect wallet"}
           </button>
         </div>
       </nav>
@@ -88,12 +144,12 @@ export default function Home() {
 
             <div className="balance-label"><span>CONFIDENTIAL BALANCE</span><span className="secured"><LockIcon size={13} /> FHE SECURED</span></div>
             <div className="balance-row">
-              <div className={revealed ? "balance-number" : "balance-number blurred"}>{revealed ? "$ 12,480.50" : "$ ••••••••"}</div>
+              <div className={revealed ? "balance-number" : "balance-number blurred"}>{revealed ? `${TOKENS[token].symbol} ${balances[token].toLocaleString(undefined, { minimumFractionDigits: 2 })}` : `${TOKENS[token].symbol} ••••••••`}</div>
               <button className="reveal-button" onClick={() => setRevealed((value) => !value)}>
                 <EyeIcon crossed={revealed} /> {revealed ? "Hide" : "Reveal"}
               </button>
             </div>
-            <div className="token-row"><span className="token-icon">$</span><span>cUSD</span><span className="encrypted-tag">Encrypted</span></div>
+            <div className="token-row"><span className="token-icon">{TOKENS[token].symbol}</span><span>{token}</span><span className="encrypted-tag">Encrypted</span></div>
 
             <div className="divider" />
             <form onSubmit={handleTransfer}>
@@ -108,8 +164,8 @@ export default function Home() {
               <div className="input-box amount-box">
                 <span className="currency">$</span>
                 <input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" inputMode="decimal" aria-label="Payment amount" />
-                <button type="button" onClick={() => setAmount("250.00")}>MAX</button>
-                <span className="currency-name">cUSD</span>
+                <button type="button" onClick={() => setAmount(String(balances[token]))}>MAX</button>
+                <span className="currency-name">{token}</span>
               </div>
               <button className="transfer-button" type="submit"><LockIcon size={17} /> Encrypt &amp; send privately <span>→</span></button>
               {notice && <p className="notice" role="status">{notice}</p>}
@@ -124,6 +180,30 @@ export default function Home() {
           <article><span className="feature-icon">◈</span><div><h2>Encrypted balances</h2><p>Your holdings remain private, even on a public blockchain.</p></div></article>
           <article><span className="feature-icon">⇄</span><div><h2>Confidential transfers</h2><p>Amounts stay hidden from observers, validators, and explorers.</p></div></article>
           <article id="privacy"><span className="feature-icon">◎</span><div><h2>You control disclosure</h2><p>Reveal only what you choose, to only whom you choose.</p></div></article>
+        </div>
+      </section>
+
+      <section className="token-lab wrap" id="tokens">
+        <div className="lab-copy">
+          <span className="section-kicker">TESTNET LAB</span>
+          <h2>Try confidential tokens.</h2>
+          <p>Choose a demo asset, claim a local test balance, then send a private payment from the wallet above.</p>
+          <div className="demo-warning"><span>i</span><div><b>Local demo faucet</b><p>This faucet simulates minting in your browser. It does not issue real or on-chain assets.</p></div></div>
+        </div>
+        <div className="faucet-card">
+          <header><div><span className="faucet-icon">⌁</span><div><b>Token faucet</b><small>ARBITRUM SEPOLIA · DEMO</small></div></div><span className="live-pill"><i /> Ready</span></header>
+          <div className="token-tabs">
+            {(Object.keys(TOKENS) as Token[]).map((item) => (
+              <button key={item} className={token === item ? "active" : ""} onClick={() => setToken(item)}>
+                <span>{TOKENS[item].symbol}</span><div><b>{item}</b><small>{TOKENS[item].name}</small></div>
+              </button>
+            ))}
+          </div>
+          <div className="claim-row"><div><small>FAUCET AMOUNT</small><strong>1,000 {token}</strong></div><button onClick={claimTokens} disabled={faucetLoading}>{faucetLoading ? "Claiming..." : "Claim test tokens"}</button></div>
+          <div className="mini-activity">
+            <div className="activity-heading"><span>RECENT DEMO ACTIVITY</span><span>{activity.length} EVENTS</span></div>
+            {activity.length ? activity.map((item, index) => <div className="activity-item" key={`${item}-${index}`}><span className="activity-check">✓</span><span>{item}</span><time>just now</time></div>) : <div className="empty-activity">Connect a wallet and claim tokens to begin.</div>}
+          </div>
         </div>
       </section>
     </main>
